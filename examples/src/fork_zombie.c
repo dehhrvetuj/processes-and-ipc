@@ -21,7 +21,8 @@ void parent(pid_t pid) {
   printf("PARENT <%ld> Press any key to reap a zombie!\n",
          (long) getpid());
 
-  getchar();
+  int c = getchar();
+  printf("input is %c\n", c);
 
   pid = wait(NULL);
 
@@ -31,7 +32,9 @@ void parent(pid_t pid) {
   printf("PARENT <%ld> Press any key to terminate!\n",
          (long) getpid());
 
-  getchar();
+  c = getchar();
+  printf("input is %c\n", c);
+
 
   printf("PARENT <%ld> Goodbye!\n",
          (long) getpid());

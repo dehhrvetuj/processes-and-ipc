@@ -8,6 +8,7 @@ void child() {
          (long) getpid(), (long) getpid(), (long) getppid());
   printf(" CHILD <%ld> Goodbye!\n",
          (long) getpid());
+		 
   exit(EXIT_SUCCESS);
 }
 
