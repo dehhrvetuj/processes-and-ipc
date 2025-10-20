@@ -3,101 +3,103 @@
 #include <unistd.h>   // getpid(), getppid(), fork(), pipe(), dup2(), execlp(), close()
 #include <sys/wait.h> // wait()
 
-#define READ  0       // index for pipe read end
-#define WRITE 1       // index for pipe write end
+#define READ  0       // pipe read end
+#define WRITE 1       // pipe write end
 
-void child_a(int fd[]) {
-  // Child A: producer process (runs `ls -F -1` and writes output into the pipe)
-  printf(" CHILD <%ld> I'm alive and my PPID = %ld.\n",
-         (long) getpid(), (long) getppid());
-  
-  close(fd[READ]);             // Child A does not need the read end of the pipe
-  
-  dup2(fd[WRITE], 1);          // Redirect STDOUT (fd=1) to the pipe's write end
-  
-  close(fd[WRITE]);            // Close the original write descriptor after dup2
-  
-  execlp("ls", "ls", "-F", "-1", NULL); // Replace child process with "ls -F -1"
-  
-  perror("execlp");            // Only executed if execlp() fails
-  exit(EXIT_FAILURE);          // Exit with failure if exec did not succeed
+void child_a(int fd[]) 
+{
+    close(fd[READ]);                          // not used in child A
+    if (dup2(fd[WRITE], 1) == -1) {           // redirect stdout → pipe write end
+        perror("dup2 in child A fails");
+        exit(EXIT_FAILURE);
+    }
+    close(fd[WRITE]);                         // close original descriptor
+    execlp("ls", "ls", "-F", "-1", NULL);     // execute "ls -F -1"
+    perror("execlp fails in A");
+    exit(EXIT_FAILURE);
 }
 
-void child_b(int fd[]) {
-  // Child B: consumer process (runs `nl` and reads input from the pipe)
-  printf(" CHILD <%ld> I'm alive and my PPID = %ld.\n",
-         (long) getpid(), (long) getppid());
-
-  close(fd[WRITE]);            // Child B does not need the write end of the pipe
-  
-  dup2(fd[READ], 0);           // Redirect STDIN (fd=0) to the pipe's read end
-  
-  close(fd[READ]);             // Close the original read descriptor after dup2
-  
-  execlp("nl", "nl", NULL);    // Replace child process with "nl"
-  
-  perror("execlp");            // Only executed if execlp() fails
-  exit(EXIT_FAILURE);          // Exit with failure if exec did not succeed
+void child_b(int fd[])
+{
+    close(fd[WRITE]);                         // not used in child B
+    if (dup2(fd[READ], 0) == -1) {            // redirect stdin ← pipe read end
+        perror("dup2 in child B fails");
+        exit(EXIT_FAILURE);
+    }
+    close(fd[READ]);                          // close original descriptor
+    execlp("nl", "nl", NULL);                 // execute "nl"
+    perror("execlp fails in B");
+    exit(EXIT_FAILURE);
 }
 
-void parent(pid_t pid) {
-  // Parent: just reports that it has created a child process
-  printf("PARENT <%ld> Spawned a child with PID = %ld.\n",
-         (long) getpid(), (long) pid);
+void parent(pid_t pid)
+{
+    // Parent can report creation if needed
 }
 
-int main(void) {
-  int fd[2];                   // pipe descriptors: fd[0] = read end, fd[1] = write end
-  pid_t pid_a, pid_b;          // child PIDs
-  
-  pipe(fd);                    // Create a pipe for communication
-
-  // First fork: create child A
-  switch (pid_a = fork()) {
-  case -1:                     // fork() error handling
-    perror("fork failed");
+void close_fd(int fd[])
+{
     close(fd[READ]);
     close(fd[WRITE]);
-    exit(EXIT_FAILURE);
-  case 0:                      // Child process branch
-    child_a(fd);               // Run child A code
-  default:                     // Parent process branch
-    parent(pid_a);             // Print parent message
-  }
-  
-  // Second fork: create child B
-  switch (pid_b = fork()) {
-  case -1:                     // fork() error handling
-    perror("fork failed");
-    close(fd[READ]);
-    close(fd[WRITE]);
-    exit(EXIT_FAILURE);
-  case 0:                      // Child process branch
-    child_b(fd);               // Run child B code
-  default:                     // Parent process branch
-    parent(pid_b);             // Print parent message
-  }
-  
-  // Parent process: not part of the pipeline, close both ends
-  close(fd[READ]);
-  close(fd[WRITE]);
-  
-  pid_t pid;
-  int status;
-  
-  // First wait(): reap whichever child exits first
-  pid = wait(&status);
-  if (WIFEXITED(status)) {
-    printf("PARENT <%ld> Child with PID = %ld and exit status = %d terminated.\n",
-           (long) getpid(), (long) pid, WEXITSTATUS(status));
-  }
-  
-  // Second wait(): reap the remaining child
-  pid = wait(&status);
-  if (WIFEXITED(status)) {
-    printf("PARENT <%ld> Child with PID = %ld and exit status = %d terminated.\n",
-           (long) getpid(), (long) pid, WEXITSTATUS(status));
-  }
+}
 
-  return 0;
+int main(void) 
+{
+    int fd[2];              // pipe descriptors
+    pid_t pid_a, pid_b;     // child PIDs
+
+    if (pipe(fd)) {
+        perror("pipe failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Fork child A
+    switch (pid_a = fork()) {
+    case -1:
+        perror("fork child A failed");
+        close_fd(fd);
+        exit(EXIT_FAILURE);
+        break;
+    case 0:
+        child_a(fd);
+        break;
+    default:
+        parent(pid_a);
+        break;
+    }
+
+    // Fork child B
+    switch (pid_b = fork()) {
+    case -1:
+        perror("fork child B failed");
+        close_fd(fd);
+        exit(EXIT_FAILURE);
+        break;
+    case 0:
+        child_b(fd);
+        break;
+    default:
+        parent(pid_b);
+        break;
+    }
+
+    // Parent closes both ends
+    close_fd(fd);
+
+    pid_t pid;
+    int status;
+
+    // Wait for first child
+    pid = wait(&status);
+    if (WIFEXITED(status)) {
+        // printf("Child %ld exited with status %d\n", (long)pid, WEXITSTATUS(status));
+    }
+
+    // Wait for second child
+    pid = wait(&status);
+    if (WIFEXITED(status)) {
+        // printf("Child %ld exited with status %d\n", (long)pid, WEXITSTATUS(status));
+    }
+
+    return 0;
 }
